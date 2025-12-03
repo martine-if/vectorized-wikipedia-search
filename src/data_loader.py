@@ -86,6 +86,7 @@ def load_qrels():
 # store all loaded data
 def load_all_raw():
     data = {
+        "documents": load_documents(),
         "queries_iri": load_queries(),
         "queries_natural": load_natural_queries(),
         "query_labels": load_query_labels(),
