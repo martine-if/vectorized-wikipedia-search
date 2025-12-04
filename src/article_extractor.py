@@ -71,11 +71,12 @@ def parse_pages(path):
     return pages
 
 def main():
-    path = '../data/raw-wiki/enwiki-latest-pages-articles-multistream1.xml-p1p41242'
+    batch_num = 3
+    path = f'../data/raw-wiki/enwiki-latest-pages-articles-multistream{batch_num}.xml'
 
     pages = parse_pages(path)
 
-    save_pages_to_file(pages, '../data/processed/articles-1.txt')
+    save_pages_to_file(pages, f'../data/processed/articles-{batch_num}.txt')
 
 
 if __name__ == '__main__':
