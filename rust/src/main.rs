@@ -1,13 +1,30 @@
-use std::io::Write;
+use std::collections::HashMap;
+use std::io::{BufWriter, Write};
 use std::fs;
+use std::fs::File;
+use std::ops::Index;
 use std::path::Path;
+use bincode::config::standard;
+use bincode::serde::{decode_from_std_read, encode_into_std_write};
 use indexmap::IndexMap;
 use indicatif::{ProgressBar, ProgressIterator};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use crate::query_vectorizer::{filter_words, get_idf_scores, get_tf_scores, parse_articles, parse_queries};
 
 mod query_vectorizer;
 
 struct Sim(u32, f64);
+
+fn save_to_cache<T: Serialize>(value: &T, path: &str) {
+    let mut file = File::create(path).expect("Failed to create cache file");
+    encode_into_std_write(value, &mut file, standard()).expect("Failed to encode");
+}
+
+fn load_from_cache<T: DeserializeOwned>(path: &str) -> T {
+    let mut file = File::open(path).expect("Failed to open file");
+    decode_from_std_read(&mut file, standard()).expect("Failed to decode")
+}
 
 fn main() {
     let query_res = parse_queries("../data/processed/keysearch.qry");
@@ -24,14 +41,23 @@ fn main() {
         .collect();
     let queries = filter_words(&queries);
 
-    let query_idf = get_idf_scores(&queries);
+    let query_idf_path = "../data/cache/query_idf.bin";
+    let query_idf: Vec<HashMap<String, f64>>;
+    if Path::new(query_idf_path).exists() {
+        query_idf = load_from_cache(query_idf_path);
+    } else {
+        query_idf = get_idf_scores(&queries);
+        save_to_cache(&query_idf, query_idf_path);
+    }
+
     let query_tf: Vec<IndexMap<String, f64>> = get_tf_scores(&queries);
 
     let articles: Vec<Vec<String>> = article_map
         .values()
         .map(|article| article.text.clone())
         .collect();
-    let articles = &articles[..articles.len().min(1000)];
+    let articles = &articles;
+    // let articles = &articles[..articles.len().min(1000)];
 
     let articles = filter_words(articles);
 
@@ -98,7 +124,7 @@ fn main() {
                 }
                 let display_rank = rank + 1;
 
-                output_lines.push(format!("{output_query_id} {doc_id} {display_rank} {sim_score}\n"))
+                output_lines.push(format!("{:03} {doc_id} {display_rank} {sim_score}", output_query_id))
             }
         }
     }

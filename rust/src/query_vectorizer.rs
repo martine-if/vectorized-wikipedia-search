@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io;
 use std::io::{BufRead, BufReader};
@@ -63,17 +63,17 @@ pub fn get_tf_scores(queries: &Vec<Vec<String>>) -> Vec<IndexMap<String, f64>> {
     query_tf
 }
 
-pub fn get_idf_scores(documents: &Vec<Vec<String>>) -> Vec<IndexMap<String, f64>> {
+pub fn get_idf_scores(documents: &Vec<Vec<String>>) -> Vec<HashMap<String, f64>> {
     let num_docs = documents.len();
     let mut docs_as_sets: Vec<HashSet<String>> = Vec::new();
     for doc in documents.clone() {
         docs_as_sets.push(doc.into_iter().collect());
     }
-    let mut idf_docs: Vec<IndexMap<String, f64>> = Vec::new();
+    let mut idf_docs: Vec<HashMap<String, f64>> = Vec::new();
     println!("Getting IDF scores...");
     let pb = ProgressBar::new(documents.len() as u64);
     for doc in documents.iter().progress_with(pb.clone()) {
-        let mut doc_idf: IndexMap<String, f64> = IndexMap::new();
+        let mut doc_idf: HashMap<String, f64> = HashMap::new();
         for t in doc {
             let mut num_docs_containing_t = 0;
             for checked_doc in &docs_as_sets {

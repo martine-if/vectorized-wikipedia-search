@@ -71,7 +71,7 @@ def parse_pages(path):
     return pages
 
 def main():
-    batch_num = 3
+    batch_num = 1
     path = f'../data/raw-wiki/enwiki-latest-pages-articles-multistream{batch_num}.xml'
 
     pages = parse_pages(path)
