@@ -28,7 +28,7 @@ fn load_from_cache<T: DeserializeOwned>(path: &str) -> T {
 
 fn main() {
     let query_res = parse_queries("../data/processed/keysearch.qry");
-    let article_res = parse_articles("../data/processed/articles-1.txt");
+    let article_res = parse_articles("../data/processed/all_articles.txt");
 
     let (query_map, article_map) = match (query_res, article_res) {
         (Ok(q), Ok(a)) => (q, a),
@@ -57,7 +57,7 @@ fn main() {
         .map(|article| article.text.clone())
         .collect();
     let articles = &articles;
-    // let articles = &articles[..articles.len().min(1000)];
+    //let articles = &articles[..articles.len().min(1000)];
 
     let articles = filter_words(articles);
 

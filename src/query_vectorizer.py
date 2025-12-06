@@ -58,7 +58,7 @@ def parse_documents(file_name):
 def filter_words(document_set: list[list[str]]):
     filtered_docs = []
     ps = PorterStemmer()
-    for doc in tqdm(document_set, desc="Filtering words"):
+    for doc in document_set:
         filtered_doc = []
         for word in doc:
             if word in punctuation:
@@ -90,7 +90,7 @@ def filter_words(document_set: list[list[str]]):
 def get_idf_scores_dict(documents: list[list[str]]):
     num_docs = len(documents)
     docs_as_sets = []
-    for doc in tqdm(documents, desc="Creating document sets"):
+    for doc in documents:
         docs_as_sets.append(set(doc))
     idf_docs = []
     for doc in tqdm(documents, desc="Calculating IDF scores"):
@@ -122,10 +122,11 @@ def main():
     documents, doc_ids = parse_documents(os.path.join(DATA_DIR, "processed/articles-1.txt"))
     
     # TESTING
+    """
     documents = documents[:1000]
     doc_ids = doc_ids[:1000]
     print(f"Using subset of {len(documents)} documents for testing")
-    
+    """
     documents = filter_words(documents)
 
     doc_idf = get_idf_scores_dict(documents)
@@ -183,7 +184,7 @@ def main():
             if rank + 1 > 10:
                 break
 
-            output_lines.append(f'{output_query_id} Q0 {doc_id} {rank + 1} {sim_score}\n')
+            output_lines.append(f'{output_query_id} {doc_id} {rank + 1} {sim_score}\n')
 
     output_path = os.path.join(DATA_DIR, "results/ranking_output.txt")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)

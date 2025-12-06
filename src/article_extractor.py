@@ -4,13 +4,13 @@ import textwrap
 
 from tqdm import tqdm
 
-from src.data_loader import load_documents
-
+from data_loader import load_documents
+offset = 726184
 
 def save_pages_to_file(pages, fn):
     with open(fn, 'w', encoding='utf-8') as file:
         for page_num, (title, contents) in enumerate(pages.items(), start=1):
-            file.write(f'.I {page_num}\n')
+            file.write(f'.I {page_num+offset}\n')
             file.write('.T\n')
             file.write(f'{title}\n')
             file.write('.W\n')
@@ -135,13 +135,13 @@ def main():
     titles_to_filter = load_dataset_article_titles()
 
     all_pages = {}
-    for batch_num in range(1, 4):
+    for batch_num in range(25, 28):
         path = f'../data/raw-wiki/enwiki-latest-pages-articles-multistream{batch_num}.xml'
 
         pages = parse_pages(path, titles_to_filter, batch_num)
         all_pages.update(pages)
 
-    save_pages_to_file(all_pages, f'../data/processed/articles-1.txt')
+    save_pages_to_file(all_pages, f'../data/processed/articles-9.txt')
 
 
 if __name__ == '__main__':
