@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader};
 use indexmap::IndexMap;
 use indicatif::{ProgressBar, ProgressIterator};
 use once_cell::sync::Lazy;
+use porter_stemmer::stem;
 
 #[derive(Debug)]
 pub struct Query {
@@ -14,7 +15,7 @@ pub struct Query {
 
 #[derive(Debug)]
 pub struct Article {
-    id: u32,
+    pub id: u32,
     pub title: String,
     pub text: Vec<String>,
 }
@@ -52,15 +53,19 @@ pub fn get_tf_scores(queries: &Vec<Vec<String>>) -> Vec<IndexMap<String, f64>> {
     println!("Getting TF scores...");
     let pb = ProgressBar::new(queries.len() as u64);
     for query in queries.iter().progress_with(pb.clone()) {
-        let mut tf: IndexMap<String, f64> = IndexMap::new();
-        for word in query {
-            let instances = query.iter().filter(|w| w == &word).count();
-            let query_size = query.len();
-            tf.insert(word.clone(), if query_size > 0 { instances as f64 / query.len() as f64 } else { 0.0 });
-        }
-        query_tf.push(tf);
+        query_tf.push(get_tf_score(query));
     }
     query_tf
+}
+
+pub fn get_tf_score(query: &Vec<String>) -> IndexMap<String, f64> {
+    let mut tf: IndexMap<String, f64> = IndexMap::new();
+    for word in query {
+        let instances = query.iter().filter(|w| w == &word).count();
+        let query_size = query.len();
+        tf.insert(word.clone(), if query_size > 0 { instances as f64 / query.len() as f64 } else { 0.0 });
+    }
+    tf
 }
 
 pub fn get_idf_scores(documents: &Vec<Vec<String>>) -> Vec<HashMap<String, f64>> {
@@ -128,11 +133,11 @@ pub fn filter_words(document_set: &[Vec<String>]) -> Vec<Vec<String>> {
             if word.contains("-") {
                 for part in word.split("-") {
                     if part.trim() != "" {
-                        filtered_doc.push(part.to_lowercase());
+                        filtered_doc.push(stem(&part.to_lowercase()));
                     }
                 }
             } else {
-                filtered_doc.push(word.to_lowercase());
+                filtered_doc.push(stem(&word.to_lowercase()));
             }
         }
         filtered_docs.push(filtered_doc)

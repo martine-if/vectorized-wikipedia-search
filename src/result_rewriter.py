@@ -26,7 +26,7 @@ def parse_documents(file_name, has_title=True):
 
 def main():
     queries = parse_documents('../data/processed/keysearch.qry', has_title=False)
-    articles = parse_documents('../data/processed/articles-1.txt')
+    articles = parse_documents('../data/processed/all_articles.txt')
 
     with open('../data/results/ranking_output_rust.txt') as file:
         with open('../data/results/ranking_output_titles.txt', 'w', encoding='utf-8') as output:

@@ -1,6 +1,6 @@
 cargo-features = ["edition2024"]
 [package]
-name = "vectorized-wikipedia-search"
+name = "wikisearch"
 version = "0.1.0"
 edition = "2024"
 
@@ -10,3 +10,6 @@ once_cell = "1.21.3"
 indicatif = "0.18.3"
 serde = { version = "1.0", feature = ["derive"] }
 bincode = { version = "2.0", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+log = "0.4.29"
+porter-stemmer = "0.1.2"

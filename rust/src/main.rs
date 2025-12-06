@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
-use std::fs;
+use std::{env, fs, io};
 use std::fs::File;
 use std::ops::Index;
 use std::path::Path;
@@ -10,11 +10,32 @@ use indexmap::IndexMap;
 use indicatif::{ProgressBar, ProgressIterator};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use crate::query_vectorizer::{filter_words, get_idf_scores, get_tf_scores, parse_articles, parse_queries, Article, Query};
+use clap::Parser;
+use log::error;
+use crate::query_vectorizer::{filter_words, get_idf_scores, get_tf_score, get_tf_scores, parse_articles, parse_queries, Article, Query};
 
 mod query_vectorizer;
 
-struct Sim(u32, f64);
+struct Sim {
+    doc_id: u32,
+    score: f64,
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "wikisearch")]
+struct Args {
+    #[arg(long)]
+    interactive: bool,
+    #[arg(short = 's', long = "size", default_value_t = 100000)]
+    size: usize
+}
+
+struct ArticleCorpus {
+    article_map: IndexMap<u32, Article>,
+    articles: Vec<Vec<String>>,
+    idf: Vec<HashMap<String, f64>>,
+    tf: Vec<IndexMap<String, f64>>,
+}
 
 fn save_to_cache<T: Serialize>(value: &T, path: &str) {
     let mut file = File::create(path).expect("Failed to create cache file");
@@ -27,12 +48,92 @@ fn load_from_cache<T: DeserializeOwned>(path: &str) -> T {
 }
 
 fn main() {
-    let query_res = parse_queries("../data/processed/keysearch.qry");
-    let article_res = parse_articles("../data/processed/all_articles.txt");
+    let args = Args::parse();
 
-    let (query_map, article_map) = match (query_res, article_res) {
-        (Ok(q), Ok(a)) => (q, a),
-        _ => return,
+    let corpus_opt = build_article_corpus("../data/processed/all_articles.txt", args.size);
+    let corpus = match corpus_opt {
+        Some(c) => c,
+        None => {
+            error!("Failed to build article corpus");
+            return
+        },
+    };
+
+    if args.interactive {
+        run_interactive(&corpus);
+    } else {
+        run_query_file(&corpus, "../data/processed/keysearch.qry");
+    }
+}
+
+fn run_interactive(corpus: &ArticleCorpus) {
+    loop {
+        print!("Enter query: ");
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+
+        let query = input.trim().to_string();
+        let query_vec: Vec<String> = query
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+
+        let query_tf = get_tf_score(&query_vec);
+        let query_idf: HashMap<String, f64> = query_tf.keys().map(|k| (k.clone(), 0.1)).collect();
+
+        let mut results = process_query(corpus, &query_vec, &query_tf, &query_idf);
+
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        let top_10 = &results[..10];
+
+        for (rank, entry) in top_10.iter().enumerate() {
+            let article = corpus.article_map.get(&entry.doc_id).unwrap();
+            let score = entry.score;
+            let rank = rank + 1;
+
+            println!("{}. {} - {}", rank, article.title, score);
+        }
+    }
+}
+
+fn build_article_corpus(path: &str, corpus_size: usize) -> Option<ArticleCorpus> {
+    let article_res = parse_articles(path);
+
+    let article_map = match article_res {
+        Ok(a) => a,
+        Err(_) => return None,
+    };
+
+    let articles: Vec<Vec<String>> = article_map
+        .values()
+        .map(|article| article.text.clone())
+        .collect();
+    let articles = &articles;
+    let articles = &articles[..articles.len().min(corpus_size)];
+
+    let articles = filter_words(articles);
+
+    let art_idf = get_idf_scores(&articles);
+    let art_tf: Vec<IndexMap<String, f64>> = get_tf_scores(&articles);
+
+    Some(ArticleCorpus {
+        article_map,
+        articles,
+        idf: art_idf,
+        tf: art_tf,
+    })
+}
+
+fn run_query_file(corpus: &ArticleCorpus, path: &str) {
+    let query_res = parse_queries(path);
+
+    let query_map = match query_res {
+        Ok(q) => q,
+        Err(_) => return,
     };
 
     let queries: Vec<Vec<String>> = query_map
@@ -52,24 +153,30 @@ fn main() {
 
     let query_tf: Vec<IndexMap<String, f64>> = get_tf_scores(&queries);
 
-    let articles: Vec<Vec<String>> = article_map
-        .values()
-        .map(|article| article.text.clone())
-        .collect();
-    let articles = &articles;
-    //let articles = &articles[..articles.len().min(1000)];
-
-    let articles = filter_words(articles);
-
-    let art_idf = get_idf_scores(&articles);
-    let art_tf: Vec<IndexMap<String, f64>> = get_tf_scores(&articles);
-
     let mut output_lines: Vec<String> = Vec::new();
 
     println!("Processing queries...");
     let pb = ProgressBar::new(queries.len() as u64);
     for (qid, query) in queries.iter().enumerate().progress_with(pb.clone()) {
-        process_query(qid, query, &articles, &art_tf, &art_idf, &query_tf, &query_idf, &article_map, &query_map, &mut output_lines);
+        let mut results = process_query(corpus, query, &query_tf[qid], &query_idf[qid]);
+
+        // Sort the results and get the top 10
+        results.select_nth_unstable_by(10, |a, b| b.score.partial_cmp(&a.score).unwrap());
+        let top10 = &mut results[..10];
+        top10.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+
+        // Append the top 10 to the output lines
+        if let Some(entry) = query_map.get_index(qid) {
+            let output_query_id = *entry.0;
+            for (rank, sim) in top10.iter().enumerate() {
+                let doc_id = sim.doc_id;
+                let sim_score = sim.score;
+
+                let display_rank = rank + 1;
+
+                output_lines.push(format!("{:03} {doc_id} {display_rank} {sim_score}", output_query_id))
+            }
+        }
     }
 
     let output_path = Path::new("../data/results/ranking_output_rust.txt");
@@ -85,44 +192,39 @@ fn main() {
     }
 }
 
+// Returns UNSORTED vec of cosine similarities
 fn process_query(
-    qid: usize,
+    corpus: &ArticleCorpus,
     query: &Vec<String>,
-    articles: &Vec<Vec<String>>,
-    art_tf: &Vec<IndexMap<String, f64>>,
-    art_idf: &Vec<HashMap<String, f64>>,
-    query_tf: &Vec<IndexMap<String, f64>>,
-    query_idf: &Vec<HashMap<String, f64>>,
-    article_map: &IndexMap<u32, Article>,
-    query_map: &IndexMap<u32, Query>,
-    output_lines: &mut Vec<String>
-) {
+    query_tf: &IndexMap<String, f64>,
+    query_idf: &HashMap<String, f64>,
+) -> Vec<Sim> {
+    let art_tf: &Vec<IndexMap<String, f64>> = &corpus.tf;
+    let art_idf: &Vec<HashMap<String, f64>> = &corpus.idf;
+
+    let mut query_vec: Vec<f64> = Vec::new();
+    for word in query {
+        let query_word_tf = query_tf[word];
+        let query_word_idf = query_idf[word];
+        let query_tf_idf = query_word_tf * query_word_idf;
+        query_vec.push(query_tf_idf);
+    }
+    let a = &query_vec;
+    let norm_a = norm(a);
+
     let mut sims: Vec<Sim> = Vec::new();
-    for (art_idx, article) in articles.iter().enumerate() {
-        let mut art_vec: Vec<f64> = Vec::new();
+    for (art_idx, _) in corpus.articles.iter().enumerate() {
+        let mut art_vec: Vec<f64> = Vec::with_capacity(query.len());
         for word in query {
-            if article.contains(word) {
-                let art_word_tf = art_tf[art_idx][word];
-                let art_word_idf = art_idf[art_idx][word];
-                let art_tf_idf = art_word_tf * art_word_idf;
-                art_vec.push(art_tf_idf);
+            if let Some(tf) = art_tf[art_idx].get(word) {
+                let idf = art_idf[art_idx].get(word).unwrap();
+                art_vec.push(tf * idf);
             } else {
                 art_vec.push(0.0);
             }
         }
 
-        let mut query_vec: Vec<f64> = Vec::new();
-        for word in query {
-            let query_word_tf = query_tf[qid][word];
-            let query_word_idf = query_idf[qid][word];
-            let query_tf_idf = query_word_tf * query_word_idf;
-            query_vec.push(query_tf_idf);
-        }
-
-        let a = &query_vec;
         let b = &art_vec;
-
-        let norm_a = norm(a);
         let norm_b = norm(b);
         let mut cos_similarity = 0.0;
         if norm_a != 0.0 && norm_b != 0.0 {
@@ -133,28 +235,13 @@ fn process_query(
             cos_similarity = 0.0;
         }
 
-        if let Some(entry) = article_map.get_index(art_idx) {
+        if let Some(entry) = corpus.article_map.get_index(art_idx) {
             let art_id = *entry.0;
-            sims.push(Sim(art_id, cos_similarity));
+            sims.push(Sim { doc_id: art_id, score: cos_similarity });
         }
     }
 
-    sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-    if let Some(entry) = query_map.get_index(qid) {
-        let output_query_id = *entry.0;
-        for (rank, sim) in sims.iter().enumerate() {
-            let doc_id = sim.0;
-            let sim_score = sim.1;
-
-            if rank + 1 > 10 {
-                break;
-            }
-            let display_rank = rank + 1;
-
-            output_lines.push(format!("{:03} {doc_id} {display_rank} {sim_score}", output_query_id))
-        }
-    }
+    sims
 }
 
 fn norm(v: &[f64]) -> f64 {
