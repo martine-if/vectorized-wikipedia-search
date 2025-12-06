@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use clap::Parser;
 use log::error;
-use crate::query_vectorizer::{filter_words, get_idf_scores, get_tf_score, get_tf_scores, parse_articles, parse_queries, Article, Query};
+use crate::query_vectorizer::{filter_word, filter_words, get_idf_scores, get_tf_score, get_tf_scores, parse_articles, parse_queries, Article, Query};
 
 mod query_vectorizer;
 
@@ -81,6 +81,8 @@ fn run_interactive(corpus: &ArticleCorpus) {
             .split_whitespace()
             .map(String::from)
             .collect();
+
+        let query_vec = filter_word(&query_vec);
 
         let query_tf = get_tf_score(&query_vec);
         let query_idf: HashMap<String, f64> = query_tf.keys().map(|k| (k.clone(), 0.1)).collect();

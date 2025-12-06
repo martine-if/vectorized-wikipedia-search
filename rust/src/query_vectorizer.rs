@@ -105,45 +105,49 @@ pub fn filter_words(document_set: &[Vec<String>]) -> Vec<Vec<String>> {
     println!("Filtering words...");
     let pb = ProgressBar::new(document_set.len() as u64);
     for document in document_set.iter().progress_with(pb.clone()) {
-        let mut filtered_doc: Vec<String> = Vec::new();
-        for word in document {
-            let mut word = word.clone();
-            if PUNCTUATION.contains(&word.as_str()) {
-                continue;
-            }
-
-            if word.chars().any(|c| c.is_ascii_digit()) {
-                continue;
-            }
-
-            for punc in PUNCTUATION {
-                word = word.replace(*punc, "");
-            }
-
-            if word == "" {
-                continue;
-            }
-
-            if STOP_LIST.contains(&word.as_str()) {
-                continue;
-            }
-
-            word = word.replace("--", "-");
-
-            if word.contains("-") {
-                for part in word.split("-") {
-                    if part.trim() != "" {
-                        filtered_doc.push(stem(&part.to_lowercase()));
-                    }
-                }
-            } else {
-                filtered_doc.push(stem(&word.to_lowercase()));
-            }
-        }
-        filtered_docs.push(filtered_doc)
+        filtered_docs.push(filter_word(document))
     }
 
     filtered_docs
+}
+
+pub fn filter_word(document: &Vec<String>) -> Vec<String> {
+    let mut filtered_doc: Vec<String> = Vec::new();
+    for word in document {
+        let mut word = word.clone();
+        if PUNCTUATION.contains(&word.as_str()) {
+            continue;
+        }
+
+        if word.chars().any(|c| c.is_ascii_digit()) {
+            continue;
+        }
+
+        for punc in PUNCTUATION {
+            word = word.replace(*punc, "");
+        }
+
+        if word == "" {
+            continue;
+        }
+
+        if STOP_LIST.contains(&word.as_str()) {
+            continue;
+        }
+
+        word = word.replace("--", "-");
+
+        if word.contains("-") {
+            for part in word.split("-") {
+                if part.trim() != "" {
+                    filtered_doc.push(stem(&part.to_lowercase()));
+                }
+            }
+        } else {
+            filtered_doc.push(stem(&word.to_lowercase()));
+        }
+    }
+    filtered_doc
 }
 
 pub fn parse_articles(file_path: &str) -> io::Result<IndexMap<u32, Article>> {
