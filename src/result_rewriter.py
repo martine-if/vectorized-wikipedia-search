@@ -28,7 +28,7 @@ def main():
     queries = parse_documents('../data/processed/keysearch.qry', has_title=False)
     articles = parse_documents('../data/processed/articles-1.txt')
 
-    with open('../data/results/ranking_output.txt') as file:
+    with open('../data/results/ranking_output_rust.txt') as file:
         with open('../data/results/ranking_output_titles.txt', 'w', encoding='utf-8') as output:
             for line in file:
                 split = line.split(' ')

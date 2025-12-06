@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 use indicatif::{ProgressBar, ProgressIterator};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use crate::query_vectorizer::{filter_words, get_idf_scores, get_tf_scores, parse_articles, parse_queries};
+use crate::query_vectorizer::{filter_words, get_idf_scores, get_tf_scores, parse_articles, parse_queries, Article, Query};
 
 mod query_vectorizer;
 
@@ -56,8 +56,8 @@ fn main() {
         .values()
         .map(|article| article.text.clone())
         .collect();
-    let articles = &articles;
-    // let articles = &articles[..articles.len().min(1000)];
+    // let articles = &articles;
+    let articles = &articles[..articles.len().min(1000)];
 
     let articles = filter_words(articles);
 
@@ -69,64 +69,7 @@ fn main() {
     println!("Processing queries...");
     let pb = ProgressBar::new(queries.len() as u64);
     for (qid, query) in queries.iter().enumerate().progress_with(pb.clone()) {
-        let mut sims: Vec<Sim> = Vec::new();
-        for (art_idx, article) in articles.iter().enumerate() {
-            let mut art_vec: Vec<f64> = Vec::new();
-            for word in query {
-                if article.contains(word) {
-                    let art_word_tf = art_tf[art_idx][word];
-                    let art_word_idf = art_idf[art_idx][word];
-                    let art_tf_idf = art_word_tf * art_word_idf;
-                    art_vec.push(art_tf_idf);
-                } else {
-                    art_vec.push(0.0);
-                }
-            }
-
-            let mut query_vec: Vec<f64> = Vec::new();
-            for word in query {
-                let query_word_tf = query_tf[qid][word];
-                let query_word_idf = query_idf[qid][word];
-                let query_tf_idf = query_word_tf * query_word_idf;
-                query_vec.push(query_tf_idf);
-            }
-
-            let a = &query_vec;
-            let b = &art_vec;
-
-            let norm_a = norm(a);
-            let norm_b = norm(b);
-            let mut cos_similarity = 0.0;
-            if norm_a != 0.0 && norm_b != 0.0 {
-                cos_similarity = dot(a, b) / (norm_a * norm_b);
-            }
-
-            if cos_similarity.is_nan() {
-                cos_similarity = 0.0;
-            }
-
-            if let Some(entry) = article_map.get_index(art_idx) {
-                let art_id = *entry.0;
-                sims.push(Sim(art_id, cos_similarity));
-            }
-        }
-
-        sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-        if let Some(entry) = query_map.get_index(qid) {
-            let output_query_id = *entry.0;
-            for (rank, sim) in sims.iter().enumerate() {
-                let doc_id = sim.0;
-                let sim_score = sim.1;
-
-                if rank + 1 > 10 {
-                    break;
-                }
-                let display_rank = rank + 1;
-
-                output_lines.push(format!("{:03} {doc_id} {display_rank} {sim_score}", output_query_id))
-            }
-        }
+        process_query(qid, query, &articles, &art_tf, &art_idf, &query_tf, &query_idf, &article_map, &query_map, &mut output_lines);
     }
 
     let output_path = Path::new("../data/results/ranking_output_rust.txt");
@@ -135,10 +78,82 @@ fn main() {
         fs::create_dir_all(parent).expect("Failed to create parent dirs");
     }
 
-    let mut file = fs::File::create(output_path).expect("Failed to create file");
+    let mut file = File::create(output_path).expect("Failed to create file");
 
     for line in output_lines {
         writeln!(file, "{}", line).expect("Failed to write line");
+    }
+}
+
+fn process_query(
+    qid: usize,
+    query: &Vec<String>,
+    articles: &Vec<Vec<String>>,
+    art_tf: &Vec<IndexMap<String, f64>>,
+    art_idf: &Vec<HashMap<String, f64>>,
+    query_tf: &Vec<IndexMap<String, f64>>,
+    query_idf: &Vec<HashMap<String, f64>>,
+    article_map: &IndexMap<u32, Article>,
+    query_map: &IndexMap<u32, Query>,
+    output_lines: &mut Vec<String>
+) {
+    let mut sims: Vec<Sim> = Vec::new();
+    for (art_idx, article) in articles.iter().enumerate() {
+        let mut art_vec: Vec<f64> = Vec::new();
+        for word in query {
+            if article.contains(word) {
+                let art_word_tf = art_tf[art_idx][word];
+                let art_word_idf = art_idf[art_idx][word];
+                let art_tf_idf = art_word_tf * art_word_idf;
+                art_vec.push(art_tf_idf);
+            } else {
+                art_vec.push(0.0);
+            }
+        }
+
+        let mut query_vec: Vec<f64> = Vec::new();
+        for word in query {
+            let query_word_tf = query_tf[qid][word];
+            let query_word_idf = query_idf[qid][word];
+            let query_tf_idf = query_word_tf * query_word_idf;
+            query_vec.push(query_tf_idf);
+        }
+
+        let a = &query_vec;
+        let b = &art_vec;
+
+        let norm_a = norm(a);
+        let norm_b = norm(b);
+        let mut cos_similarity = 0.0;
+        if norm_a != 0.0 && norm_b != 0.0 {
+            cos_similarity = dot(a, b) / (norm_a * norm_b);
+        }
+
+        if cos_similarity.is_nan() {
+            cos_similarity = 0.0;
+        }
+
+        if let Some(entry) = article_map.get_index(art_idx) {
+            let art_id = *entry.0;
+            sims.push(Sim(art_id, cos_similarity));
+        }
+    }
+
+    sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+    if let Some(entry) = query_map.get_index(qid) {
+        let output_query_id = *entry.0;
+        for (rank, sim) in sims.iter().enumerate() {
+            let doc_id = sim.0;
+            let sim_score = sim.1;
+
+            if rank + 1 > 10 {
+                break;
+            }
+            let display_rank = rank + 1;
+
+            output_lines.push(format!("{:03} {doc_id} {display_rank} {sim_score}", output_query_id))
+        }
     }
 }
 
