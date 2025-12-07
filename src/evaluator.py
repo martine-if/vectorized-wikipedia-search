@@ -17,11 +17,30 @@ def load_query_id_mapping():
 
     return mapping
 
+def write_expected_output_to_file(expected, articles):
+    queries = parse_documents('../data/processed/keysearch.qry', has_title=False)
+
+    with open('../data/results/expected_output.txt', 'w', encoding='utf-8') as file:
+        expected_sorted = dict(sorted(expected.items()))
+        for query_num, article_ids in expected_sorted.items():
+            query_text = queries[int(query_num)]
+            file.write(f'{query_num}. {query_text}\n  ')
+            for i, article_id in enumerate(article_ids):
+                article_title = articles[article_id]
+                if i == len(article_ids) - 1:
+                    file.write(article_title)
+                else:
+                    file.write(f'{article_title}, ')
+            file.write('\n')
+
 def main():
     docs = load_documents()
 
     query_id_map = load_query_id_mapping()
     articles = parse_documents('../data/processed/all_articles.txt')
+    corpus_size = 100000
+    articles = {k: v for i, (k, v) in enumerate(articles.items()) if i < corpus_size}
+
     reversed_articles = {v: k for k, v in articles.items()}
 
     expected = {}
@@ -43,6 +62,8 @@ def main():
 
         expected[query_num] = article_ids
 
+    write_expected_output_to_file(expected, articles)
+
     total_precision = 0
     total_recall = 0
     total_queries = 0
@@ -62,6 +83,12 @@ def main():
                 if next_query_id != curr_query_id:
                     expected_articles = expected[int(curr_query_id)]
 
+                    # Skip if there are no results expected for this query
+                    if len(expected_articles) == 0:
+                        curr_query_id = next_query_id
+                        curr_query_articles = []
+                        continue
+
                     num_relevant = 0
                     for generated_article in curr_query_articles:
                         if generated_article in expected_articles:
@@ -69,11 +96,7 @@ def main():
 
                     precision_at_10 = num_relevant / 10
 
-                    num_expected = len(expected_articles)
-                    if num_expected > 0:
-                        recall_at_10 = num_relevant / num_expected
-                    else:
-                        recall_at_10 = 0
+                    recall_at_10 = num_relevant / len(expected_articles)
 
                     if precision_at_10 == 0 and recall_at_10 == 0:
                         f1 = 0
