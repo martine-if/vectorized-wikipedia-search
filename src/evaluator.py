@@ -62,7 +62,7 @@ def main():
 
         expected[query_num] = article_ids
 
-    write_expected_output_to_file(expected, articles)
+    # write_expected_output_to_file(expected, articles)
 
     total_precision = 0
     total_recall = 0
