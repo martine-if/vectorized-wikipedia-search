@@ -1,19 +1,19 @@
 from nltk import precision
 
-from src.data_loader import load_documents
-from src.result_rewriter import parse_documents
+from data_loader import load_documents
+from result_rewriter import parse_documents
 
 # Map queryID from JSON dataset to query number in keysearch.qry (e.g. MH10 -> 001)
 def load_query_id_mapping():
     mapping = {}
-    with open('../data/processed/query_id_mapping.txt') as file:
+    with open('../data/processed/query_id_mapping.txt', 'r', encoding='utf-8') as file:
         for i, line in enumerate(file):
             if i == 0:
                 continue
             split = line.split(' ')
             query_num = int(split[0])
-            query_id = split[1]
-            mapping[query_id] = query_num
+            original_id = split[1]
+            mapping[original_id] = query_num
 
     return mapping
 
@@ -47,7 +47,7 @@ def main():
     total_recall = 0
     total_queries = 0
 
-    with open('../data/results/ranking_output_rust.txt') as file:
+    with open('../data/results/ranking_output_rust.txt', 'r', encoding='utf-8') as file:
         with open('../data/results/queries_scored.txt', 'w', encoding='utf-8') as out:
             curr_query_id = None
             curr_query_articles = []
