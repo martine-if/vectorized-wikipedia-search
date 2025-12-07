@@ -115,9 +115,9 @@ fn build_article_corpus(path: &str, corpus_size: usize) -> Option<ArticleCorpus>
         .map(|article| article.text.clone())
         .collect();
     let articles = &articles;
-    let articles = &articles[..articles.len().min(corpus_size)];
-
-    let articles = filter_words(articles);
+    let articles = articles[..articles.len().min(corpus_size)].to_vec();
+    let articles = insert_titles(articles, &article_map);
+    let articles = filter_words(&articles);
 
     let art_idf = get_idf_scores(&articles);
     let art_tf: Vec<IndexMap<String, f64>> = get_tf_scores(&articles);
@@ -128,6 +128,14 @@ fn build_article_corpus(path: &str, corpus_size: usize) -> Option<ArticleCorpus>
         idf: art_idf,
         tf: art_tf,
     })
+}
+
+fn insert_titles(mut articles: Vec<Vec<String>>, article_map: &IndexMap<u32, Article>) -> Vec<Vec<String>> {
+    for (i, text) in articles.iter_mut().enumerate() {
+        let article = article_map.get_index(i).unwrap().1;
+        text.insert(0, article.title.clone())
+    }
+    articles
 }
 
 fn run_query_file(corpus: &ArticleCorpus, path: &str) {
