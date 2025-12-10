@@ -1,4 +1,7 @@
+import gzip
 import xml.etree.ElementTree as ET
+
+import ijson
 import mwparserfromhell
 import textwrap
 import re
@@ -6,10 +9,9 @@ import re
 from tqdm import tqdm
 
 from data_loader import load_documents
-offset = 726184
 category_pattern = re.compile(r'\[\[Category:([^\]]+)\]\]')
 
-def save_pages_to_file(pages, fn):
+def save_pages_to_file(pages, fn, offset):
     with open(fn, 'w', encoding='utf-8') as file:
         for page_num, (title, contents) in enumerate(pages.items(), start=1):
             file.write(f'.I {page_num+offset}\n')
@@ -17,6 +19,91 @@ def save_pages_to_file(pages, fn):
             file.write(f'{title}\n')
             file.write('.W\n')
             file.write(f'{contents}\n')
+    print(f'Finished writing to {fn}')
+
+def load_dataset_article_iris():
+    iris = set()
+    docs = load_documents()
+    for doc in docs:
+        entities = doc['relevantEntities']
+        for entity in entities:
+            iri = entity['iri']
+
+            iris.add(iri)
+    return iris
+
+def filter_pages(pages: dict[str, str], iris: set[str]):
+    pass
+
+def process_wikidata():
+    iris = load_dataset_article_iris()
+    title_mapping = {}
+
+    lines = 0
+    batch = 3
+    reached = False
+    out = open(f'../data/processed/title_mapping_{batch}.txt', 'w', encoding='utf-8')
+    print(f'Starting batch {batch}')
+    with gzip.open("../data/raw-wiki/wikidata-20240101-all.json.gz", "rb") as f:
+        objects = ijson.items(f, "item")
+        for obj in objects:
+            if obj['type'] != 'item':
+                continue
+            item_id = obj['id']
+            if item_id not in iris:
+                continue
+            sitelinks = obj.get('sitelinks')
+            if sitelinks is None:
+                continue
+            enwiki = sitelinks.get('enwiki')
+            if enwiki is None:
+                continue
+            title = enwiki.get('title')
+            if title is None:
+                continue
+
+            if not reached:
+                if int(item_id[1:]) <= 7720524:
+                    continue
+                elif not reached:
+                    reached = True
+
+            title_mapping[item_id] = title
+            out.write(f'{item_id} {title}\n')
+            lines += 1
+
+            if lines % 200000 == 0:
+                batch += 1
+                out.close()
+                print(f'Starting batch {batch}')
+                out = open(f'../data/processed/title_mapping_{batch}.txt', 'w', encoding='utf-8')
+
+    out.close()
+
+    return title_mapping
+
+def read_title_set():
+    title_set = set()
+    for i in range(1, 13):
+        with open(f'../data/processed/title_mapping_{i}.txt', 'r') as file:
+            print(f'Reading title_mapping_{i}.txt')
+            for line in file:
+                split = line.split(' ', 1)
+                title = split[1].strip()
+                title_set.add(title)
+    print(f'Title set size: {len(title_set)}')
+    return title_set
+
+def read_title_mapping():
+    title_map = {}
+    for i in range(1, 13):
+        with open(f'../data/processed/title_mapping_{i}.txt', 'r') as file:
+            print(f'Reading title_mapping_{i}.txt')
+            for line in file:
+                split = line.split(' ', 1)
+                title = split[1].strip()
+                title_map[split[0]] = title
+    return title_map
 
 def load_dataset_article_titles():
     titles = set()
@@ -151,16 +238,22 @@ def parse_pages(path, titles_to_filter: set[str], batch_num):
     return pages
 
 def main():
-    titles_to_filter = load_dataset_article_titles()
+    title_set = read_title_set()
 
-    all_pages = {}
-    for batch_num in range(25, 28):
-        path = f'../data/raw-wiki/enwiki-latest-pages-articles-multistream{batch_num}.xml'
+    offset = 0
+    for i in range(1, 11):
+        all_pages = {}
+        lower = 1 + (i - 1) * 7
+        upper = 8 + (i - 1) * 7
+        print(f'Starting batches {lower}-{upper-1}')
+        for batch_num in range(lower, upper):
+            path = f'../data/raw-wiki/enwiki-latest-pages-articles-multistream{batch_num}.xml'
 
-        pages = parse_pages(path, titles_to_filter, batch_num)
-        all_pages.update(pages)
+            pages = parse_pages(path, title_set, batch_num)
+            all_pages.update(pages)
 
-    save_pages_to_file(all_pages, f'../data/processed/articles-9.txt')
+        save_pages_to_file(all_pages, f'../data/processed/articles_{i}.txt', offset)
+        offset += len(all_pages)
 
 
 if __name__ == '__main__':

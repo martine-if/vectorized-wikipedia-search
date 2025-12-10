@@ -2,6 +2,8 @@ from nltk import precision
 
 from data_loader import load_documents
 from result_rewriter import parse_documents
+from src.article_extractor import read_title_mapping
+
 
 # Map queryID from JSON dataset to query number in keysearch.qry (e.g. MH10 -> 001)
 def load_query_id_mapping():
@@ -38,10 +40,12 @@ def main():
 
     query_id_map = load_query_id_mapping()
     articles = parse_documents('../data/processed/all_articles.txt')
-    corpus_size = 100000
+    corpus_size = 2000000
     articles = {k: v for i, (k, v) in enumerate(articles.items()) if i < corpus_size}
 
     reversed_articles = {v: k for k, v in articles.items()}
+
+    title_mapping = read_title_mapping()
 
     expected = {}
     for doc in docs:
@@ -52,17 +56,18 @@ def main():
 
         article_ids = []
         for entity in relevant:
-            label = entity['label']
-            if len(label) >= 2 and label[0] == 'Q' and label[1].isdigit():
+            iri = entity['iri']
+            title = title_mapping.get(iri)
+            if title is None:
                 continue
 
-            article_id = reversed_articles.get(label)
+            article_id = reversed_articles.get(title)
             if article_id is not None:
                 article_ids.append(int(article_id))
 
         expected[query_num] = article_ids
 
-    # write_expected_output_to_file(expected, articles)
+    write_expected_output_to_file(expected, articles)
 
     total_precision = 0
     total_recall = 0

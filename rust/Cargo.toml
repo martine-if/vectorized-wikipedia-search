@@ -13,3 +13,4 @@ bincode = { version = "2.0", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 log = "0.4.29"
 porter-stemmer = "0.1.2"
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "time"]}

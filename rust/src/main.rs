@@ -4,6 +4,7 @@ use std::{env, fs, io};
 use std::fs::File;
 use std::ops::Index;
 use std::path::Path;
+use std::sync::Arc;
 use bincode::config::standard;
 use bincode::serde::{decode_from_std_read, encode_into_std_write};
 use indexmap::IndexMap;
@@ -12,6 +13,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use clap::Parser;
 use log::error;
+use tokio::task;
+use tokio::task::spawn_blocking;
 use crate::query_vectorizer::{filter_word, filter_words, get_idf_scores, get_tf_score, get_tf_scores, parse_articles, parse_queries, Article, Query};
 
 mod query_vectorizer;
@@ -62,7 +65,7 @@ fn main() {
     if args.interactive {
         run_interactive(&corpus);
     } else {
-        run_query_file(&corpus, "../data/processed/keysearch.qry");
+        run_query_file(corpus, "../data/processed/keysearch.qry");
     }
 }
 
@@ -138,7 +141,7 @@ fn insert_titles(mut articles: Vec<Vec<String>>, article_map: &IndexMap<u32, Art
     articles
 }
 
-fn run_query_file(corpus: &ArticleCorpus, path: &str) {
+fn run_query_file(corpus: ArticleCorpus, path: &str) {
     let query_res = parse_queries(path);
 
     let query_map = match query_res {
@@ -150,7 +153,7 @@ fn run_query_file(corpus: &ArticleCorpus, path: &str) {
         .values()
         .map(|query| query.text.clone())
         .collect();
-    let queries = filter_words(&queries);
+    let queries = Arc::new(filter_words(&queries));
 
     let query_idf_path = "../data/cache/query_idf.bin";
     let query_idf: Vec<HashMap<String, f64>>;
@@ -160,34 +163,19 @@ fn run_query_file(corpus: &ArticleCorpus, path: &str) {
         query_idf = get_idf_scores(&queries);
         save_to_cache(&query_idf, query_idf_path);
     }
+    let query_idf = Arc::new(query_idf);
 
     let query_tf: Vec<IndexMap<String, f64>> = get_tf_scores(&queries);
+    let query_tf = Arc::new(query_tf);
+    let query_map = Arc::new(query_map);
 
-    let mut output_lines: Vec<String> = Vec::new();
+    let corpus = Arc::new(corpus);
 
     println!("Processing queries...");
-    let pb = ProgressBar::new(queries.len() as u64);
-    for (qid, query) in queries.iter().enumerate().progress_with(pb.clone()) {
-        let mut results = process_query(corpus, query, &query_tf[qid], &query_idf[qid]);
 
-        // Sort the results and get the top 10
-        results.select_nth_unstable_by(10, |a, b| b.score.partial_cmp(&a.score).unwrap());
-        let top10 = &mut results[..10];
-        top10.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
-
-        // Append the top 10 to the output lines
-        if let Some(entry) = query_map.get_index(qid) {
-            let output_query_id = *entry.0;
-            for (rank, sim) in top10.iter().enumerate() {
-                let doc_id = sim.doc_id;
-                let sim_score = sim.score;
-
-                let display_rank = rank + 1;
-
-                output_lines.push(format!("{:03} {doc_id} {display_rank} {sim_score}", output_query_id))
-            }
-        }
-    }
+    let output_lines = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(process_all(corpus, queries, query_tf, query_idf, query_map));
 
     let output_path = Path::new("../data/results/ranking_output_rust.txt");
 
@@ -200,6 +188,69 @@ fn run_query_file(corpus: &ArticleCorpus, path: &str) {
     for line in output_lines {
         writeln!(file, "{}", line).expect("Failed to write line");
     }
+}
+
+async fn process_all(
+    corpus: Arc<ArticleCorpus>,
+    queries: Arc<Vec<Vec<String>>>,
+    query_tf: Arc<Vec<IndexMap<String, f64>>>,
+    query_idf: Arc<Vec<HashMap<String, f64>>>,
+    query_map: Arc<IndexMap<u32, Query>>,
+) -> Vec<String> {
+    let pb = ProgressBar::new(queries.len() as u64);
+
+    let mut handles = Vec::with_capacity(queries.len());
+
+    for qid in 0..queries.len() {
+        let corpus = Arc::clone(&corpus);
+        let queries = Arc::clone(&queries);
+        let query_tf = Arc::clone(&query_tf);
+        let query_idf = Arc::clone(&query_idf);
+        let query_map = Arc::clone(&query_map);
+
+        let pb = pb.clone();
+
+        handles.push(spawn_blocking(move || {
+            let query = &queries[qid];
+            let tf = &query_tf[qid];
+            let idf = &query_idf[qid];
+            let output_query_id = *query_map.get_index(qid).unwrap().0;
+
+            let mut results = process_query(&corpus, query, tf, idf);
+
+            results.select_nth_unstable_by(10, |a, b| {
+                b.score.partial_cmp(&a.score).unwrap()
+            });
+
+            let top10 = &mut results[..10];
+            top10.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+
+            let mut lines = Vec::with_capacity(10);
+            for (rank, sim) in top10.iter().enumerate() {
+                lines.push(format!(
+                    "{:03} {} {} {}",
+                    output_query_id,
+                    sim.doc_id,
+                    rank + 1,
+                    sim.score
+                ));
+            }
+
+            pb.inc(1);
+
+            lines
+        }));
+    }
+
+    let mut all = Vec::new();
+    for h in handles {
+        let mut part = h.await.unwrap();
+        all.append(&mut part);
+    }
+
+    pb.finish();
+
+    all
 }
 
 // Returns UNSORTED vec of cosine similarities
